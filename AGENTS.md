@@ -1,3 +1,11 @@
+---
+ai_memory_project: openclaw
+ai_memory_project_id: 288c4bf3-a320-42d3-b38c-5e88ead6c102
+research_lab_page: ~/code/research-lab/70_WIKI/projects/OpenClaw.md
+research_lab_registry: ~/code/research-lab/50_PROJECTS/PROJECTS.md
+github: https://github.com/openclaw/openclaw
+---
+
 # AGENTS.MD
 
 Telegraph style. Root rules only. Read scoped `AGENTS.md` before subtree work.
