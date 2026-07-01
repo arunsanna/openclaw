@@ -705,6 +705,17 @@ function handleTerminalChatEvent(
   // with the persisted copy and causes a visible disappear/reappear flicker.
   if (hadToolEvents && state === "final") {
     if (activeRunIdBeforeEvent && !shouldReloadHistoryForFinalEvent(payload)) {
+      // Deferred tool-stream cleanup: reset after the next paint so the
+      // optimistic message is already on screen before we clear tool cards.
+      // This avoids flicker while still preventing stale tool messages from
+      // interfering with the sort order on subsequent re-renders.
+      requestAnimationFrame(() => {
+        const currentRunId = host.chatRunId;
+        if (currentRunId && currentRunId !== activeRunIdBeforeEvent) {
+          return; // A new run started — don't touch the stream.
+        }
+        resetToolStream(toolHost);
+      });
       flushQueue();
       return false;
     }

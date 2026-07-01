@@ -681,8 +681,14 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   // See https://github.com/openclaw/openclaw/issues/1909
   if (state.chatRunId && payload.runId !== state.chatRunId) {
     if (payload.state === "final") {
-      const finalMessage = normalizeFinalAssistantMessage(payload.message);
+      let finalMessage = normalizeFinalAssistantMessage(payload.message);
       if (finalMessage && !shouldHideAssistantChatMessage(finalMessage)) {
+        if (
+          typeof finalMessage.timestamp !== "number" ||
+          !Number.isFinite(finalMessage.timestamp)
+        ) {
+          finalMessage = { ...finalMessage, timestamp: Date.now() };
+        }
         state.chatMessages = [...state.chatMessages, finalMessage];
         return null;
       }
@@ -716,8 +722,13 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
       state.chatStream = next;
     }
   } else if (payload.state === "final") {
-    const finalMessage = normalizeFinalAssistantMessage(payload.message);
+    let finalMessage = normalizeFinalAssistantMessage(payload.message);
     if (finalMessage && !shouldHideAssistantChatMessage(finalMessage)) {
+      // Ensure the final assistant message always has a valid timestamp so that
+      // sortChatItemsByVisibleTime does not push it below tool/stream items.
+      if (typeof finalMessage.timestamp !== "number" || !Number.isFinite(finalMessage.timestamp)) {
+        finalMessage = { ...finalMessage, timestamp: Date.now() };
+      }
       state.chatMessages = [...state.chatMessages, finalMessage];
     } else if (
       state.chatStream?.trim() &&
@@ -735,8 +746,16 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     }
     reconcileTerminalRun("done", "done");
   } else if (payload.state === "aborted") {
-    const normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
+    let normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
     if (normalizedMessage && !shouldHideAssistantChatMessage(normalizedMessage)) {
+      // Ensure the aborted assistant message always has a valid timestamp so
+      // that sortChatItemsByVisibleTime does not push it below tool/stream items.
+      if (
+        typeof normalizedMessage.timestamp !== "number" ||
+        !Number.isFinite(normalizedMessage.timestamp)
+      ) {
+        normalizedMessage = { ...normalizedMessage, timestamp: Date.now() };
+      }
       state.chatMessages = [...state.chatMessages, normalizedMessage];
     } else {
       const streamedText = state.chatStream ?? "";

@@ -297,38 +297,84 @@ function rawMessageTimestamp(message: unknown): number | null {
   return typeof timestamp === "number" && Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function chatItemTimestamp(item: ChatItem): number | null {
+/**
+ * Extract the server-assigned transcript sequence number (__openclaw.seq).
+ * This is the most reliable ordering key because it is monotonically
+ * increasing and assigned by the gateway — no clock-skew or missing-field risk.
+ */
+function transcriptSeq(message: unknown): number | null {
+  const raw = asRecord(message);
+  if (!raw) {
+    return null;
+  }
+  const marker = raw["__openclaw"];
+  if (!marker || typeof marker !== "object" || Array.isArray(marker)) {
+    return null;
+  }
+  const seq = (marker as Record<string, unknown>).seq;
+  return typeof seq === "number" && Number.isFinite(seq) ? seq : null;
+}
+
+function chatItemSortKey(item: ChatItem): {
+  seq: number | null;
+  timestamp: number | null;
+} {
   switch (item.kind) {
     case "message":
       return item.key === "chat:history:notice"
-        ? Number.NEGATIVE_INFINITY
-        : rawMessageTimestamp(item.message);
+        ? { seq: null, timestamp: Number.NEGATIVE_INFINITY }
+        : { seq: transcriptSeq(item.message), timestamp: rawMessageTimestamp(item.message) };
     case "divider":
-      return item.timestamp;
+      return { seq: null, timestamp: item.timestamp };
     case "stream":
-      return item.startedAt;
+      return { seq: null, timestamp: item.startedAt };
     case "reading-indicator":
-      return null;
+      return { seq: null, timestamp: null };
   }
-  return null;
+  return { seq: null, timestamp: null };
 }
 
+/**
+ * Sort chat items into display order using a three-level comparison:
+ *
+ *   1. __openclaw.seq  — server-assigned monotonic sequence (most reliable)
+ *   2. timestamp       — wall-clock fallback for optimistic / streaming items
+ *   3. array index     — stable tiebreaker preserving insertion order
+ *
+ * Items without timestamps are NEVER pushed to the end; they fall through to
+ * the array-index tiebreaker so that recently-appended messages (including
+ * assistant responses whose server payload lacked a `timestamp` field) stay
+ * in their natural insertion position.
+ */
 function sortChatItemsByVisibleTime(items: ChatItem[]): ChatItem[] {
   return items
-    .map((item, index) => ({ item, index, timestamp: chatItemTimestamp(item) }))
+    .map((item, index) => ({ item, index, ...chatItemSortKey(item) }))
     .toSorted((a, b) => {
-      if (a.timestamp == null && b.timestamp == null) {
-        return a.index - b.index;
+      // 1) Server sequence — the authoritative order for persisted history.
+      if (a.seq != null && b.seq != null && a.seq !== b.seq) {
+        return a.seq - b.seq;
       }
-      if (a.timestamp == null) {
-        return 1;
-      }
-      if (b.timestamp == null) {
+      // If only one side has a seq, the one WITH seq is history (earlier),
+      // the one WITHOUT is optimistic/stream (later — added after history).
+      if (a.seq != null && b.seq == null) {
         return -1;
       }
-      if (a.timestamp !== b.timestamp) {
+      if (a.seq == null && b.seq != null) {
+        return 1;
+      }
+      // 2) Timestamp — wall-clock for items that lack a server seq.
+      if (a.timestamp != null && b.timestamp != null && a.timestamp !== b.timestamp) {
         return a.timestamp - b.timestamp;
       }
+      // When one has a timestamp and the other doesn't, prefer timestamp
+      // as the signal but do NOT demote null to the very end — only nudge.
+      if (a.timestamp != null && b.timestamp == null) {
+        return -1;
+      }
+      if (a.timestamp == null && b.timestamp != null) {
+        return 1;
+      }
+      // 3) Stable tiebreaker — original insertion / array order.
       return a.index - b.index;
     })
     .map(({ item }) => item);
